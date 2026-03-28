@@ -37,7 +37,7 @@ def train(config, args):
     print("Training Start!")
     for epoch in range(config['epochs']):
         trainer.train(epoch)
-        trainer.save(epoch, args.output_path)
+        trainer.save(epoch, args.output_dir)
 
 
 if __name__ == '__main__':

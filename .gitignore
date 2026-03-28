@@ -5,3 +5,9 @@ pickle_rw/
 preprocess/
 downstream_task/report_generation_and_vqa/output/
 downstream_task/report_generation_and_vqa/wandb/
+data/preprocessed/
+data/__pycache__/
+models/__pycache__/
+utils/__pycache__/
+downstream_task/classification/utils/__pycache__/
+downstream_task/classification/models/__pycache__/

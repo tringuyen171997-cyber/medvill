@@ -10,7 +10,8 @@ import numpy as np
 
 from models.MedViLL_origin import MedViLL
 
-from transformers.optimization import AdamW
+# from transformers.optimization import AdamW
+from torch.optim import AdamW
 from transformers import BertConfig, AlbertConfig, AutoConfig
 
 
@@ -28,9 +29,48 @@ class MedViLL_Trainer():
                                 model_config=model_config, args=args, configs=configs).to(self.device)
             print('resume')
             print(model_config)
+        # else:
+        #     model_config = BertConfig.from_pretrained("bert-base-uncased")
+        #     self.model = MedViLL(model_config, args, configs).to(self.device)
         else:
-            model_config = BertConfig.from_pretrained("bert-base-uncased")
+            from transformers import AutoModel, AutoTokenizer
+
+            biomed_model_name = "microsoft/BiomedNLP-BiomedBERT-base-uncased-abstract"
+            
+            print("[INFO] Loading BiomedBERT config + pretrained weights...")
+            model_config = BertConfig.from_pretrained(biomed_model_name)
+            
+            # Initialize MedViLL with BiomedBERT config
             self.model = MedViLL(model_config, args, configs).to(self.device)
+
+            # Load BiomedBERT pretrained weights into BERT text side only
+            pretrained_bert = AutoModel.from_pretrained(biomed_model_name)
+            pretrained_dict = pretrained_bert.state_dict()
+            model_dict      = self.model.state_dict()
+
+            filtered = {}
+            loaded   = []
+            skipped  = []
+
+            for k, v in pretrained_dict.items():
+                # Try common prefix mappings
+                candidates = [k, f"bert.{k}", f"encoder.{k}"]
+                for candidate in candidates:
+                    if candidate in model_dict and model_dict[candidate].shape == v.shape:
+                        filtered[candidate] = v
+                        loaded.append(candidate)
+                        break
+                else:
+                    skipped.append(k)
+
+            model_dict.update(filtered)
+            self.model.load_state_dict(model_dict)
+
+            print(f"[INFO] BiomedBERT weights loaded : {len(loaded)}")
+            print(f"[INFO] BiomedBERT weights skipped: {len(skipped)}")
+
+            del pretrained_bert
+            torch.cuda.empty_cache()
 
         # if torch.cuda.device_count() > 1:
         #     print("Using %d GPUS for BERT" % torch.cuda.device_count())
@@ -43,7 +83,23 @@ class MedViLL_Trainer():
         
         self.train_data = train_dataloader
         self.test_data = test_dataloader
-        self.optimizer = AdamW(self.model.parameters(), lr=self.configs['lr'])
+        # self.optimizer = AdamW(self.model.parameters(), lr=self.configs['lr'])
+        lora_params = []
+        last_block_params = []
+
+        for name, p in self.model.named_parameters():
+            if not p.requires_grad:
+                continue
+            if "lora" in name:
+                lora_params.append(p)
+            else:
+                last_block_params.append(p)
+
+        # Create optimizer with different LRs
+        self.optimizer = AdamW([
+            {"params": lora_params, "lr": 1e-4},       # LoRA: faster learning
+            {"params": last_block_params, "lr": 1e-4}  # last ViT blocks: same LR now
+        ], betas=(0.9, 0.999), eps=1e-6, weight_decay=0.01)
         self.mlm_criterion = nn.CrossEntropyLoss(ignore_index=-100)
         self.itm_criterion = nn.CrossEntropyLoss()
         self.step_cnt = 0
@@ -73,6 +129,23 @@ class MedViLL_Trainer():
             sep_tok = sep_tok.to(self.device)
             
             mlm_output, itm_output = self.model(cls_tok, input_ids, attn_masks, segment, img, sep_tok)
+
+            if i == 0 and epoch == 0:
+                print(f"[DEBUG] mlm_output shape : {mlm_output.shape}")
+                print(f"[DEBUG] itm_output shape : {itm_output.shape}")
+                print(f"[DEBUG] ITM predictions  : {itm_output.argmax(dim=-1)[:8].tolist()}")
+                print(f"[DEBUG] ITM labels       : {is_aligned[:8].tolist()}")
+                
+                # skip image tokens (num_image_embeds + 2 for CLS+SEP) to see text labels
+                img_offset = self.configs['num_image_embeds'] + 2
+                print(f"[DEBUG] txt_labels (text portion): {txt_labels[0][img_offset:img_offset+30].tolist()}")
+                
+                non_minus100 = (txt_labels[0] != -100).sum().item()
+                print(f"[DEBUG] non-masked tokens in batch[0]: {non_minus100}")
+                
+                trainable = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+                total = sum(p.numel() for p in self.model.parameters())
+                print(f"[DEBUG] Trainable params : {trainable:,} / {total:,}")
 
             if self.args.mlm_task and self.args.itm_task == False:
                 mlm_loss = self.mlm_criterion(mlm_output.transpose(1, 2), txt_labels)
@@ -177,9 +250,9 @@ class MedViLL_Trainer():
             os.chmod(save_path_per_ep, 0o777)
 
         if torch.cuda.device_count() > 1:
-            self.model.module.save_pretrained(save_path_per_ep)
+            self.model.module.save_pretrained(save_path_per_ep, safe_serialization=False)
             print(f'Multi_EP: {epoch} Model saved on {save_path_per_ep}')
         else:
-            self.model.save_pretrained(save_path_per_ep)
+            self.model.save_pretrained(save_path_per_ep, safe_serialization=False)
             print(f'Single_EP: {epoch} Model saved on {save_path_per_ep}')
         os.chmod(save_path_per_ep + '/pytorch_model.bin', 0o777)

@@ -15,11 +15,21 @@ from transformers import BertModel
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
 
-def get_transforms():
-    return transforms.Compose(
-        [transforms.RandomResizedCrop(512, scale=(0.8, 1.1), ratio=(3/4, 4/3)),   
-         transforms.ToTensor(),
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
+def get_transforms(is_train=True):
+    if is_train:
+        return transforms.Compose(
+            [transforms.RandomResizedCrop(224, scale=(0.8, 1.1), ratio=(3/4, 4/3)),
+             transforms.RandomHorizontalFlip(p=0.5),
+             transforms.RandomRotation(degrees=10),
+             transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.05),
+             transforms.ToTensor(),
+             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
+    else:
+        return transforms.Compose(
+            [transforms.Resize(256),
+             transforms.CenterCrop(224),
+             transforms.ToTensor(),
+             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
         
 def truncate_txt(txt_tokens, max_seq_len):
     while True:
@@ -45,6 +55,9 @@ class CXRDataset(Dataset):
         self.max_seq_len -= config['num_image_embeds']  # 512 - #img_embeds
         self.total_len = self.seq_len + self.config['num_image_embeds'] + 3
         self._tril_matrix = torch.tril(torch.ones((self.total_len, self.total_len), dtype=torch.long))
+        self.is_train = 'Train' in data_path
+        self.transforms = get_transforms(self.is_train)
+        print(f"[DATASET] {data_path} -> is_train: {self.is_train}, aug: {len(self.transforms.transforms) > 4}")
         self.vocab_stoi = self.tokenizer.vocab
         self.vocab_len = len(self.vocab_stoi)
         
@@ -53,28 +66,75 @@ class CXRDataset(Dataset):
 
     def __getitem__(self, idx):
         # MLM
+        # if self.data_path.endswith(".jsonl"):
+        #     origin_txt, img_path, is_aligned = self.random_pair_sampling(idx)        
+        # elif self.data_path.endswith(".csv"):
+        #     image_path_list = ast.literal_eval(self.data["image"][idx])
+        #     img_path = random.choice(image_path_list)
+        #     text = ast.literal_eval(self.data["text"][idx])
+        #     if isinstance(text, list):
+        #         origin_txt = random.choice(text)
+        #     #(Mock value)
+        #     is_aligned = 1
         if self.data_path.endswith(".jsonl"):
-            origin_txt, img_path, is_aligned = self.random_pair_sampling(idx)        
+            origin_txt, img_path, is_aligned = self.random_pair_sampling(idx)
+
         elif self.data_path.endswith(".csv"):
             image_path_list = ast.literal_eval(self.data["image"][idx])
             img_path = random.choice(image_path_list)
             text = ast.literal_eval(self.data["text"][idx])
             if isinstance(text, list):
                 origin_txt = random.choice(text)
-            #(Mock value)
-            is_aligned = 1
+            else:
+                origin_txt = text  # ← also fix this, if text is a plain string not a list
+
+            # FIXED: 50/50 ITM sampling instead of always is_aligned = 1
+            itm_prob = random.random()
+            if itm_prob > 0.5:
+                # Positive pair — image matches text
+                is_aligned = 1
+            else:
+                # Negative pair — replace text with text from a different sample
+                for _ in range(300):
+                    rand_idx = random.randint(0, len(self.data) - 1)
+                    if rand_idx == idx:
+                        continue
+                    rand_text = ast.literal_eval(self.data["text"][rand_idx])
+                    if isinstance(rand_text, list):
+                        rand_txt_candidate = random.choice(rand_text)
+                    else:
+                        rand_txt_candidate = rand_text
+                    # Make sure it's actually a different text
+                    if fuzz.token_sort_ratio(origin_txt, rand_txt_candidate) != 100:
+                        origin_txt = rand_txt_candidate
+                        is_aligned = 0
+                        break
+                else:
+                    # Fallback: if no different text found after 300 tries, keep positive
+                    is_aligned = 1
 
         image = Image.open(os.path.join(img_path)).convert("RGB")
 
-        image = get_transforms()(image)
+        image = self.transforms(image)
         
-        tokenized_sentence = self.tokenizer(origin_txt)
+        tokenized_sentence = self.tokenizer.tokenize(origin_txt)
         truncate_txt(tokenized_sentence, self.seq_len)
 
-        encoded_sentence = [self.vocab_stoi[w] if w in self.vocab_stoi else self.vocab_stoi["[UNK]"]
-                            for w in tokenized_sentence]  # [178, 8756, 1126, 12075]
+        
+        encoded_sentence = [
+            self.vocab_stoi[w] if w in self.vocab_stoi else self.vocab_stoi["[UNK]"]
+            for w in tokenized_sentence
+        ]  # [178, 8756, 1126, 12075]
 
         input_ids, txt_labels = self.random_word(encoded_sentence)
+        if idx < 3:
+            print(f"[DATASET DEBUG] idx={idx}")
+            print(f"  origin_txt preview : {origin_txt[:80]}")
+            print(f"  tokenized length   : {len(tokenized_sentence)}")
+            print(f"  tokens preview     : {tokenized_sentence[:10]}")
+            non_minus100 = sum(1 for x in txt_labels if x != -100)  # check after random_word
+            print(f"  non-masked labels  : {non_minus100}")
+            print(f"  is_aligned         : {is_aligned}")
 
         if self.args.disturbing_mask:
             input_ids = input_ids + [self.vocab_stoi["[SEP]"]]

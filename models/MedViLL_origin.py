@@ -1,13 +1,14 @@
 import math
 import torch
 import torch.nn as nn
-from models.image import ImageEncoder_cnn, Img_patch_embedding
 from transformers import BertConfig, BertModel, BertPreTrainedModel
+from models.image import ImageEncoder_cnn, BioMedCLIPImageEncoder, Img_patch_embedding
 
 class ImageBertEmbeddings(nn.Module):
     def __init__(self, embeddings):
         super().__init__()
-        self.img_embeddings = nn.Linear(2048, 768)
+        # self.img_embeddings = nn.Linear(2048, 768)
+        self.img_embeddings = nn.Identity()
         self.token_type_embeddings = embeddings.token_type_embeddings
         self.LayerNorm = embeddings.LayerNorm
         self.dropout = nn.Dropout(0.1)
@@ -38,6 +39,10 @@ class MedViLLEncoder(BertPreTrainedModel):
             img_size = configs['img_size']
             patch_sz = 32 if img_size == 512 else 16
             self.img_encoder = Img_patch_embedding(image_size=img_size, patch_size=patch_sz, dim=2048)
+        elif configs['img_encoder'] == 'BioMedCLIP':
+            self.img_encoder = BioMedCLIPImageEncoder(args, configs)
+            print(f"[INFO] Using encoder: {self.img_encoder.__class__.__name__}")
+
         else:
             self.img_encoder = ImageEncoder_cnn(args, configs)
             for p in self.img_encoder.parameters():
