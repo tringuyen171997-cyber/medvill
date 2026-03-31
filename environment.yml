@@ -1,0 +1,50 @@
+name: medvill
+channels:
+  - conda-forge
+dependencies:
+  - freetype=2.10.4=h5ab3b9f_0
+  - pip=20.2.4=py38_0
+  - torchvision=0.20.0
+  - cudatoolkit=11.0.221=h6bb024c_0
+  - certifi=2024.8.30
+  - pandas=1.1.3=py38he6710b0_0
+  - tk=8.6.10=hbc83047_0
+  - libuv=1.40.0=h7b6447c_0
+  - ca-certificates=2026.2.25
+  - pillow=8.0.1=py38he98fc37_0
+  - lz4-c=1.9.2=heb0550a_3
+  - jpeg=9b=h024ee3a_2
+  - pytz=2020.1=py_0
+  - mkl_random=1.1.1=py38h0573a6f_0
+  - openssl=1.1.1h=h7b6447c_0
+  - intel-openmp=2020.2=254
+  - torchaudio=2.4.1
+  - lcms2=2.11=h396b838_0
+  - mkl_fft=1.2.0=py38h23d657b_0
+  - libpng=1.6.37=hbc83047_0
+  - typing_extensions=3.7.4.3=py_0
+  - python-dateutil=2.8.1=py_0
+  - zlib=1.2.11=h7b6447c_3
+  - olefile=0.46=py_0
+  - wheel=0.35.1=py_0
+  - xz=5.2.5=h7b6447c_0
+  - python=3.8.5=h7579374_1
+  - libtiff=4.1.0=h2733197_1
+  - ld_impl_linux-64=2.33.1=h53a641e_7
+  - numpy=1.19.2=py38h54aff64_0
+  - mkl-service=2.3.0=py38he904b0f_0
+  - six=1.15.0=py_0
+  - pytorch
+  - sqlite=3.33.0=h62c20be_0
+  - libgcc-ng=9.1.0=hdf63c60_0
+  - zstd=1.4.5=h9ceee32_0
+  - ncurses=6.2=he6710b0_1
+  - blas=1.0=mkl
+  - libffi=3.3=he6710b0_2
+  - mkl=2020.2=256
+  - setuptools=50.3.0=py38hb0f4dca_1
+  - readline=8.0=h7b6447c_0
+  - libstdcxx-ng=9.1.0=hdf63c60_0
+  - libedit=3.1.20191231=h14c3975_1
+  - pytorch-cuda=12.4
+prefix: /venv/medvill
